@@ -1,1301 +1,810 @@
-# Multi-Agent Architecture Design
+# Meta Planning & Parallel Domain Decomposition
+
+## 📖 Table of Contents
+
+1. [Overview](#overview)
+2. [Core Concepts](#core-concepts)
+3. [Architecture](#architecture)
+4. [Domain Agents](#domain-agents)
+5. [Complete Workflow](#complete-workflow)
+6. [Implementation Details](#implementation-details)
+7. [Key Benefits](#key-benefits)
+
+---
 
 ## Overview
 
-The Meta Planner system uses a **hierarchical multi-agent architecture** where specialized agents collaborate to decompose, plan, and execute complex workflows. This architecture enables parallel processing, domain expertise, and scalable task execution.
+### What is Meta Planning?
 
-## Agent Hierarchy
+**Meta Planning** is a hierarchical planning approach where a high-level **Meta Planner** orchestrates multiple specialized **Domain Agents** to decompose complex goals into executable task graphs. Instead of a single monolithic agent trying to solve everything, the system distributes planning responsibilities across domain experts.
 
-### Level 1: Meta Planner Agent (Orchestrator)
-**Role**: Top-level strategic planner and orchestrator
+### What is Parallel Domain Decomposition?
 
-**Responsibilities**:
-- Receive high-level goals from users via API
-- Decompose goals into domain-specific sub-goals
-- Identify cross-domain dependencies
-- Coordinate domain planning agents
-- Synthesize domain plans into unified execution plan
-- Monitor overall execution progress
-- Trigger replanning when needed
+**Parallel Domain Decomposition** means breaking down a complex problem into multiple independent domains (META, CAD, SIM, COMP, SUPP), where each domain has its own specialized agents that work in parallel to generate domain-specific tasks. These tasks are then merged into a unified dependency-aware task graph.
 
-**Key Capabilities**:
-- Strategic decomposition using LLM reasoning
-- Cross-domain dependency analysis
-- Plan synthesis and optimization
-- Adaptive replanning
+### The Big Picture
+
+```
+User Goal → Meta Planner → Domain Agents (Parallel) → Task Graph → Execution → Results
+```
 
 ---
 
-### Level 2: Agent Coordinator (Manager)
-**Role**: Central coordination and communication hub
+## Core Concepts
 
-**Responsibilities**:
-- Manage agent registry (registration, discovery, health)
-- Route tasks to appropriate domain agents
-- Manage message bus for inter-agent communication
-- Handle agent failures and recovery
-- Load balance across multiple agent instances
-- Maintain shared state across agents
+### 1. **Hierarchical Agent Architecture**
 
-**Key Capabilities**:
-- Dynamic agent discovery
-- Intelligent task routing
-- Fault tolerance and recovery
-- State synchronization
+The system uses a **3-level hierarchy**:
+
+```
+Level 1: Meta Planner (Orchestrator)
+    ↓
+Level 2: Agent Coordinator (Manager)
+    ↓
+Level 3: Domain Agents (Specialists)
+    ↓ (each domain has multiple sub-agents)
+Level 4: Specialized Sub-Agents (Workers)
+```
+
+### 2. **Task Graph (DAG)**
+
+All tasks are organized into a **Directed Acyclic Graph (DAG)** where:
+- **Nodes** = Individual tasks
+- **Edges** = Dependencies between tasks
+- **Critical Path** = Longest path determining minimum execution time
+- **Parallel Batches** = Tasks that can run simultaneously
+
+### 3. **Domain Specialization**
+
+Each domain focuses on a specific aspect of the product lifecycle:
+
+| Domain | Focus Area | Example Tasks |
+|--------|------------|---------------|
+| **META** | Governance, Compliance, Safety | Policy validation, safety checks |
+| **CAD** | Design, Geometry, Modeling | Concept design, CAD modeling |
+| **SIM** | Simulation, Validation, Testing | FEA, CFD, performance analysis |
+| **COMP** | Components, BOM, Sourcing | Part selection, cost estimation |
+| **SUPP** | Supply Chain, Procurement | Supplier selection, logistics |
 
 ---
 
-### Level 3: Domain Planning Agents (Specialists)
+## Architecture
 
-#### 3.1 META Agent (Regulatory & Compliance)
-**Domain**: High-level coordination, regulatory compliance, standards
+### System Components
 
-**Responsibilities**:
-- Validate regulatory requirements
-- Ensure compliance with industry standards
-- Coordinate cross-domain activities
-- Risk assessment and mitigation planning
+```mermaid
+graph TB
+    User[User] --> API[FastAPI Backend]
+    API --> MetaPlanner[Meta Planner]
+    MetaPlanner --> Coordinator[Agent Coordinator]
+    Coordinator --> META[META Domain]
+    Coordinator --> CAD[CAD Domain]
+    Coordinator --> SIM[SIM Domain]
+    Coordinator --> COMP[COMP Domain]
+    Coordinator --> SUPP[SUPP Domain]
+    
+    META --> TaskGraph[Unified Task Graph]
+    CAD --> TaskGraph
+    SIM --> TaskGraph
+    COMP --> TaskGraph
+    SUPP --> TaskGraph
+    
+    TaskGraph --> ExecEngine[Execution Engine]
+    ExecEngine --> Results[Results & Metrics]
+```
 
-**Planning Strategies**:
-- Compliance-first planning
-- Risk-based prioritization
-- Regulatory constraint propagation
+### File Structure
 
-#### 3.2 CAD Agent (Design & Modeling)
-**Domain**: Computer-aided design, 3D modeling, design validation
-
-**Responsibilities**:
-- Plan design tasks and iterations
-- Identify design dependencies
-- Schedule design reviews
-- Coordinate with simulation for validation
-
-**Planning Strategies**:
-- Iterative design planning
-- Design-for-X considerations
-- Concurrent engineering approach
-
-#### 3.3 SIM Agent (Simulation & Analysis)
-**Domain**: Simulation, analysis, validation, testing
-
-**Responsibilities**:
-- Plan simulation campaigns
-- Identify analysis requirements
-- Schedule validation activities
-- Coordinate with CAD for design feedback
-
-**Planning Strategies**:
-- Test-driven planning
-- Progressive validation approach
-- Multi-fidelity simulation planning
-
-#### 3.4 COMP Agent (Component Planning)
-**Domain**: Component selection, BOM management, compliance
-
-**Responsibilities**:
-- Plan component sourcing
-- Manage BOM evolution
-- Ensure component compliance
-- Coordinate with suppliers
-
-**Planning Strategies**:
-- Make-vs-buy analysis
-- Component reuse optimization
-- Compliance verification planning
-
-#### 3.5 SUPP Agent (Supply Chain)
-**Domain**: Supplier management, procurement, logistics
-
-**Responsibilities**:
-- Plan supplier engagement
-- Schedule procurement activities
-- Manage supply chain risks
-- Coordinate delivery timelines
-
-**Planning Strategies**:
-- Just-in-time planning
-- Multi-supplier strategies
-- Risk-based supplier selection
+```
+Meta_Planning/
+├── src/
+│   ├── api/
+│   │   └── main.py                 # FastAPI endpoints
+│   ├── core/
+│   │   └── meta_planner.py         # Meta Planner orchestrator
+│   ├── agents/
+│   │   ├── agent_coordinator.py    # Coordinates domain agents
+│   │   ├── domain_agents.py        # Domain agent implementations
+│   │   └── agent_base.py           # Base agent class
+│   ├── models/
+│   │   └── models.py               # Data models (Goal, Task, Plan)
+│   ├── llm/
+│   │   ├── llm_client.py           # LLM integration
+│   │   └── prompts.py              # Agent prompts
+│   └── execution/
+│       └── execution_engine.py     # Task execution engine
+```
 
 ---
 
-### Level 4: Execution Agents (Workers)
-**Role**: Execute tasks planned by domain agents
+## Domain Agents
 
-**Responsibilities**:
-- Execute individual tasks
-- Report progress and results
-- Handle task-level errors
-- Validate task completion
+### 🧠 META Domain Agents (Governance & Constraints)
 
-**Key Capabilities**:
-- Task execution
-- Result validation
-- Error handling
-- Progress reporting
+**Purpose**: Translate abstract goals into enforceable rules, constraints, and validations that govern all downstream planning and execution.
 
----
+**Sub-Agents**:
 
-## Communication Protocols
+1. **Policy Agent**
+   - Interprets regulations, standards, and policies
+   - Example: "Ensure ISO 26262 compliance for automotive safety"
 
-### 1. Request-Response (Synchronous)
-**Use Case**: Planning requests, queries, immediate responses
+2. **Safety Agent**
+   - Identifies hazards and safety risks
+   - Example: "Identify potential failure modes in brake system"
 
-**Flow**:
-```
-Meta Planner → Agent Coordinator → Domain Agent → Response
-```
+3. **Compliance Agent**
+   - Enforces regulatory and policy compliance
+   - Example: "Verify IATF 16949 certification requirements"
 
-**Message Format**:
-```json
-{
-  "message_id": "uuid",
-  "type": "request",
-  "sender": "meta_planner",
-  "recipient": "cad_agent",
-  "payload": {
-    "action": "plan",
-    "goal": "Design automotive component",
-    "constraints": {...}
-  },
-  "timestamp": "2026-01-20T11:00:00Z"
-}
-```
+4. **Constraint Agent**
+   - Formalizes and resolves constraints
+   - Example: "Budget must not exceed $100,000"
 
-### 2. Publish-Subscribe (Asynchronous)
-**Use Case**: Status updates, events, notifications
+5. **Ethics/Sustainability Agent**
+   - Evaluates ethical and environmental factors
+   - Example: "Assess carbon footprint of manufacturing process"
 
-**Topics**:
-- `plan.created` - New plan created
-- `task.started` - Task execution started
-- `task.completed` - Task completed
-- `task.failed` - Task failed
-- `agent.status` - Agent status updates
+6. **Validation Agent**
+   - Performs final approval of the task graph before execution
+   - Example: "Verify all compliance checks are complete"
 
-**Flow**:
-```
-Agent → Message Bus → Subscribed Agents
-```
-
-### 3. Task Queue (Distributed)
-**Use Case**: Task distribution, execution coordination
-
-**Queue Types**:
-- `planning_queue` - Planning tasks
-- `execution_queue` - Execution tasks
-- `priority_queue` - High-priority tasks
-- `retry_queue` - Failed tasks for retry
-
-**Flow**:
-```
-Domain Agent → Task Queue → Execution Agent → Result Queue
-```
-
-### 4. State Synchronization
-**Use Case**: Shared state management
-
-**State Types**:
-- **Plan State**: Current plan, task graph, dependencies
-- **Execution State**: Task status, progress, results
-- **Agent State**: Agent availability, capabilities, load
-
-**Mechanism**: Event sourcing with state snapshots
+**Output**: 2-4 governance tasks that act as gatekeepers for downstream work.
 
 ---
 
-## Multi-Agent Workflows
+### 🧩 CAD Domain Agents (Design & Geometry)
+
+**Purpose**: Generate, modify, validate, and refine design artifacts in a structured and manufacturable way.
+
+**Sub-Agents**:
+
+1. **Concept Agent**
+   - Generates high-level design concepts and alternatives
+   - Example: "Create 3 brake caliper design concepts"
+
+2. **Parametric Agent**
+   - Controls design variables and parametric models
+   - Example: "Define parametric model with adjustable dimensions"
+
+3. **Geometry Agent**
+   - Creates detailed CAD geometry
+   - Example: "Generate 3D CAD model in SolidWorks"
+
+4. **Tolerance Agent**
+   - Handles GD&T (Geometric Dimensioning and Tolerancing)
+   - Example: "Define tolerances for critical mating surfaces"
+
+5. **Manufacturability Agent**
+   - Performs DFM/DFA (Design for Manufacturing/Assembly) checks
+   - Example: "Verify design can be machined with standard tools"
+
+6. **Revision Agent**
+   - Applies design changes after simulation or compliance failures
+   - Example: "Modify design based on FEA stress analysis results"
+
+7. **Visualization Agent**
+   - Produces renderings and visual artifacts
+   - Example: "Generate photorealistic renderings for review"
+
+**Output**: 3-5 design tasks covering concept to detailed geometry.
+
+---
+
+### ⚙️ SIM Domain Agents (Simulation & Validation)
+
+**Purpose**: Evaluate designs under physical, performance, and operational conditions before production.
+
+**Sub-Agents**:
+
+1. **Pre-Processing Agent**
+   - Prepares simulation models and boundary conditions
+   - Example: "Create FEA mesh with 100,000 elements"
+
+2. **Physics Simulation Agent**
+   - Runs structural, thermal, fluid, or kinematic simulations
+   - Example: "Run FEA stress analysis under braking load"
+
+3. **Performance Evaluation Agent**
+   - Evaluates outputs against performance metrics
+   - Example: "Verify max stress < 300 MPa yield strength"
+
+4. **Optimization Agent**
+   - Suggests parameter tuning and design improvements
+   - Example: "Optimize rib thickness to reduce weight by 15%"
+
+5. **Failure Analysis Agent**
+   - Diagnoses why simulations fail or underperform
+   - Example: "Identify stress concentration causing failure"
+
+6. **Verification Agent**
+   - Confirms simulation validity and correctness
+   - Example: "Verify mesh convergence and boundary conditions"
+
+**Output**: 3-5 simulation tasks forming a closed feedback loop with design.
+
+---
+
+### 🧱 COMP Domain Agents (Components & BOM Intelligence)
+
+**Purpose**: Bridge digital design with real-world components, cost, and availability.
+
+**Sub-Agents**:
+
+1. **Component Selection Agent**
+   - Chooses appropriate parts from catalogs
+   - Example: "Select M8 bolts from McMaster-Carr"
+
+2. **BOM Agent**
+   - Generates and manages bill of materials
+   - Example: "Create BOM with part numbers and quantities"
+
+3. **Cost Agent**
+   - Estimates and optimizes cost
+   - Example: "Estimate total component cost: $2,450"
+
+4. **Availability Agent**
+   - Checks supplier availability and lead times
+   - Example: "Verify all parts available within 2 weeks"
+
+5. **Substitution Agent**
+   - Finds alternative components when needed
+   - Example: "Find substitute for out-of-stock bearing"
+
+6. **Compatibility Agent**
+   - Ensures mechanical/electrical fit
+   - Example: "Verify bolt length compatible with assembly"
+
+7. **Lifecycle Agent**
+   - Analyzes obsolescence and long-term viability
+   - Example: "Check for end-of-life components"
+
+**Output**: 2-4 component tasks ensuring buildability and cost-effectiveness.
+
+---
+
+### 🔗 SUPP Domain Agents (Supply Chain & Procurement)
+
+**Purpose**: Manage supplier relationships, procurement, and logistics.
+
+**Sub-Agents**:
+
+1. **Supplier Selection Agent**
+   - Evaluates and selects suppliers
+   - Example: "Select certified automotive suppliers"
+
+2. **Procurement Agent**
+   - Manages purchasing and contracts
+   - Example: "Issue purchase orders for all components"
+
+3. **Logistics Agent**
+   - Plans shipping and delivery
+   - Example: "Schedule delivery to manufacturing facility"
+
+4. **Risk Management Agent**
+   - Identifies and mitigates supply chain risks
+   - Example: "Identify single-source components and find alternates"
+
+5. **Quality Assurance Agent**
+   - Ensures supplier quality standards
+   - Example: "Verify supplier ISO 9001 certification"
+
+**Output**: 2-4 supply chain tasks ensuring timely and quality delivery.
+
+---
+
+## Complete Workflow
 
 ### Workflow 1: Goal Decomposition & Planning
+
+#### Visual Workflow Diagram
 
 ```mermaid
 sequenceDiagram
     participant User
-    participant API
-    participant MetaPlanner
-    participant Coordinator
-    participant META
-    participant CAD
-    participant SIM
-    participant COMP
-    participant SUPP
+    participant API as FastAPI<br/>(main.py)
+    participant MetaPlanner as MetaPlanner<br/>(meta_planner.py)
+    participant Coordinator as AgentCoordinator<br/>(agent_coordinator.py)
+    participant META as META Agent<br/>(domain_agents.py)
+    participant CAD as CAD Agent<br/>(domain_agents.py)
+    participant SIM as SIM Agent<br/>(domain_agents.py)
+    participant COMP as COMP Agent<br/>(domain_agents.py)
+    participant SUPP as SUPP Agent<br/>(domain_agents.py)
 
-    User->>API: Submit Goal
-    API->>MetaPlanner: Create Plan Request
-    MetaPlanner->>MetaPlanner: Decompose Goal
+    Note over User,SUPP: 📋 WORKFLOW 1: Goal Decomposition & Planning<br/>━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━<br/>🔌 API: POST /api/v1/plans/create<br/>🤖 Agents: META (6 sub-agents), CAD (7 sub-agents), SIM (6 sub-agents), COMP (7 sub-agents), SUPP (5 sub-agents)<br/>📁 Files: main.py, meta_planner.py, agent_coordinator.py, domain_agents.py
+
+    User->>API: POST /api/v1/plans/create
+    Note over API: create_plan(request)<br/>Receives goal and options
     
-    MetaPlanner->>Coordinator: Route Sub-Goals
+    API->>MetaPlanner: create_plan(goal, options)
+    Note over MetaPlanner: Orchestrates planning workflow
     
-    par Parallel Planning
-        Coordinator->>META: Plan Compliance
-        META-->>Coordinator: Compliance Plan
+    MetaPlanner->>MetaPlanner: _decompose_goal(goal)
+    Note over MetaPlanner: Delegates to coordinator
+    
+    MetaPlanner->>Coordinator: coordinate_planning(goal)
+    Note over Coordinator: Distributes planning to domain agents
+    
+    par Parallel Planning (Sequential Execution)
+        Coordinator->>META: plan(goal, context)
+        Note over META: 🧠 META Domain Agents<br/>METAAgent.plan()<br/>━━━━━━━━━━━━━━━━━━━━━━<br/>• Policy Agent<br/>• Safety Agent<br/>• Compliance Agent<br/>• Constraint Agent<br/>• Ethics/Sustainability Agent<br/>• Validation Agent
+        META-->>Coordinator: List[Task] (2-4 tasks)
         
-        Coordinator->>CAD: Plan Design
-        CAD-->>Coordinator: Design Plan
+        Coordinator->>CAD: plan(goal, context)
+        Note over CAD: 🧩 CAD Domain Agents<br/>CADAgent.plan()<br/>━━━━━━━━━━━━━━━━━━━━━━<br/>• Concept Agent<br/>• Parametric Agent<br/>• Geometry Agent<br/>• Tolerance Agent<br/>• Manufacturability Agent<br/>• Revision Agent<br/>• Visualization Agent
+        CAD-->>Coordinator: List[Task] (3-5 tasks)
         
-        Coordinator->>SIM: Plan Simulation
-        SIM-->>Coordinator: Simulation Plan
+        Coordinator->>SIM: plan(goal, context)
+        Note over SIM: ⚙️ SIM Domain Agents<br/>SIMAgent.plan()<br/>━━━━━━━━━━━━━━━━━━━━━━<br/>• Pre-Processing Agent<br/>• Physics Simulation Agent<br/>• Performance Evaluation Agent<br/>• Optimization Agent<br/>• Failure Analysis Agent<br/>• Verification Agent
+        SIM-->>Coordinator: List[Task] (3-5 tasks)
         
-        Coordinator->>COMP: Plan Components
-        COMP-->>Coordinator: Component Plan
+        Coordinator->>COMP: plan(goal, context)
+        Note over COMP: 🧱 COMP Domain Agents<br/>COMPAgent.plan()<br/>━━━━━━━━━━━━━━━━━━━━━━<br/>• Component Selection Agent<br/>• BOM Agent<br/>• Cost Agent<br/>• Availability Agent<br/>• Substitution Agent<br/>• Compatibility Agent<br/>• Lifecycle Agent
+        COMP-->>Coordinator: List[Task] (2-4 tasks)
         
-        Coordinator->>SUPP: Plan Supply Chain
-        SUPP-->>Coordinator: Supply Plan
+        Coordinator->>SUPP: plan(goal, context)
+        Note over SUPP: 🔗 SUPP Domain Agents<br/>SUPPAgent.plan()<br/>━━━━━━━━━━━━━━━━━━━━━━<br/>• Supplier Selection Agent<br/>• Procurement Agent<br/>• Logistics Agent<br/>• Risk Management Agent<br/>• Quality Assurance Agent
+        SUPP-->>Coordinator: List[Task] (2-4 tasks)
     end
     
-    Coordinator->>MetaPlanner: Aggregate Plans
-    MetaPlanner->>MetaPlanner: Synthesize & Optimize
-    MetaPlanner->>API: Return Unified Plan
-    API->>User: Plan Response
-```
-
-### Workflow 2: Plan Execution
-
-```mermaid
-sequenceDiagram
-    participant Coordinator
-    participant TaskQueue
-    participant CAD_Exec
-    participant SIM_Exec
-    participant MessageBus
-    participant MetaPlanner
-
-    Coordinator->>TaskQueue: Enqueue Tasks
+    Note over Coordinator: _add_cross_domain_dependencies()<br/>Links tasks: META→CAD→SIM→COMP→SUPP<br/>Ensures correct execution order
     
-    par Parallel Execution
-        TaskQueue->>CAD_Exec: Execute Design Task
-        CAD_Exec->>MessageBus: Publish task.started
-        CAD_Exec->>CAD_Exec: Execute
-        CAD_Exec->>MessageBus: Publish task.completed
-        
-        TaskQueue->>SIM_Exec: Execute Simulation Task
-        SIM_Exec->>MessageBus: Publish task.started
-        SIM_Exec->>SIM_Exec: Execute
-        SIM_Exec->>MessageBus: Publish task.completed
-    end
+    Coordinator->>MetaPlanner: Return all_tasks (with dependencies)
     
-    MessageBus->>MetaPlanner: Aggregate Progress
-    MetaPlanner->>Coordinator: Update Plan State
-```
-
-### Workflow 3: Adaptive Replanning
-
-```mermaid
-sequenceDiagram
-    participant Executor
-    participant MessageBus
-    participant MetaPlanner
-    participant Coordinator
-    participant DomainAgent
-
-    Executor->>MessageBus: Publish task.failed
-    MessageBus->>MetaPlanner: Failure Notification
-    MetaPlanner->>MetaPlanner: Analyze Impact
+    MetaPlanner->>MetaPlanner: _analyze_dependencies(tasks)
+    Note over MetaPlanner: Builds DependencyEdge objects<br/>from task.dependencies
     
-    alt Minor Failure
-        MetaPlanner->>Coordinator: Retry Task
-        Coordinator->>Executor: Re-execute
-    else Major Failure
-        MetaPlanner->>Coordinator: Request Replan
-        Coordinator->>DomainAgent: Replan Request
-        DomainAgent->>Coordinator: Alternative Plan
-        Coordinator->>MetaPlanner: Updated Plan
-        MetaPlanner->>MessageBus: Publish plan.updated
-    end
+    MetaPlanner->>MetaPlanner: _calculate_metrics(task_graph)
+    Note over MetaPlanner: Uses NetworkX for analysis<br/>Critical path, parallelization ratio
+    
+    MetaPlanner->>API: Return Plan object
+    Note over MetaPlanner: Contains plan_id, task_graph, metrics
+    
+    API->>User: 200 OK<br/>PlanCreateResponse
+    Note over API: Returns plan_id, task_count, agents_assigned
 ```
 
 ---
 
-## Agent Communication Patterns
+**Step-by-Step Process**:
 
-### Pattern 1: Scatter-Gather
-**Use Case**: Meta Planner distributes sub-goals to domain agents and gathers results
-
-```python
-# Meta Planner scatters planning requests
-sub_goals = decompose_goal(goal)
-futures = []
-for sub_goal in sub_goals:
-    agent = coordinator.route_to_agent(sub_goal)
-    future = agent.plan_async(sub_goal)
-    futures.append(future)
-
-# Gather results
-plans = await asyncio.gather(*futures)
-unified_plan = synthesize_plans(plans)
-```
-
-### Pattern 2: Pipeline
-**Use Case**: Sequential processing through multiple agents (META → CAD → SIM → COMP → SUPP)
-
-```python
-# Pipeline execution
-result = await (
-    meta_agent.plan(goal)
-    .then(cad_agent.plan)
-    .then(sim_agent.plan)
-    .then(comp_agent.plan)
-    .then(supp_agent.plan)
-)
-```
-
-### Pattern 3: Broadcast
-**Use Case**: Notify all agents of system-wide events
-
-```python
-# Broadcast event to all agents
-message_bus.publish("system.shutdown", {
-    "reason": "maintenance",
-    "timestamp": datetime.now()
-})
-```
-
----
-
-## Coordination Mechanisms
-
-### 1. Agent Registry
-**Purpose**: Track all active agents and their capabilities
-
-**Data Structure**:
-```python
-{
-    "agent_id": "cad_agent_001",
-    "type": "CAD",
-    "capabilities": ["design", "modeling", "validation"],
-    "status": "active",
-    "load": 0.65,
-    "last_heartbeat": "2026-01-20T11:00:00Z"
-}
-```
-
-### 2. Task Routing
-**Purpose**: Route tasks to appropriate agents
-
-**Routing Strategies**:
-- **Capability-based**: Match task requirements to agent capabilities
-- **Load-based**: Route to least loaded agent
-- **Affinity-based**: Route related tasks to same agent
-- **Round-robin**: Distribute evenly across agents
-
-### 3. Failure Recovery
-**Purpose**: Handle agent failures gracefully
-
-**Recovery Strategies**:
-- **Task Retry**: Retry failed tasks with exponential backoff
-- **Agent Restart**: Restart failed agents automatically
-- **Task Reassignment**: Reassign tasks from failed agents
-- **Degraded Mode**: Continue with reduced capabilities
-
-### 4. State Synchronization
-**Purpose**: Maintain consistent state across agents
-
-**Synchronization Mechanisms**:
-- **Event Sourcing**: Append-only event log
-- **State Snapshots**: Periodic state checkpoints
-- **Conflict Resolution**: Last-write-wins or custom logic
-
----
-
-## Scalability Considerations
-
-### Horizontal Scaling
-- **Multiple Agent Instances**: Run multiple instances of each domain agent
-- **Load Balancing**: Distribute tasks across instances
-- **Stateless Agents**: Design agents to be stateless for easy scaling
-
-### Vertical Scaling
-- **Resource Allocation**: Allocate more resources to bottleneck agents
-- **Parallel Processing**: Process multiple tasks concurrently within agent
-
-### Performance Optimization
-- **Caching**: Cache frequently used data and plans
-- **Batching**: Batch similar tasks for efficiency
-- **Async Processing**: Use async/await for I/O-bound operations
-
----
-
-## Security & Isolation
-
-### Agent Isolation
-- Each agent runs in isolated environment
-- Limited access to shared resources
-- Sandboxed execution for safety
-
-### Authentication & Authorization
-- Agent-to-agent authentication via tokens
-- Role-based access control (RBAC)
-- Audit logging for all agent actions
-
-### Data Privacy
-- Encrypt inter-agent communication
-- Secure storage of sensitive data
-- Data access controls per agent
-
----
-
-## Monitoring & Observability
-
-### Metrics
-- **Agent Metrics**: CPU, memory, task count, success rate
-- **Coordination Metrics**: Message throughput, routing latency
-- **System Metrics**: Overall throughput, end-to-end latency
-
-### Logging
-- **Structured Logging**: JSON-formatted logs
-- **Distributed Tracing**: Trace requests across agents
-- **Correlation IDs**: Track related events
-
-### Alerting
-- **Agent Health**: Alert on agent failures
-- **Performance**: Alert on degraded performance
-- **Resource Usage**: Alert on resource exhaustion
-
----
-
-## API Specifications
-
-This section details all REST APIs required for the multi-agent meta-planning system, organized by functional area and implementation stage.
-
-### API Architecture
-
-**Base URL**: `http://localhost:8000/api/v1`
-
-**Authentication**: Bearer token (JWT)
-
-**Response Format**: JSON
-
-**Error Handling**: Standard HTTP status codes with detailed error messages
-
----
-
-## Stage 1: Core Planning APIs
-
-### 1.1 Goal & Plan Management
-
-#### `POST /plans/create`
-Create a new plan from a high-level goal.
-
-**Request**:
-```json
+#### 1. **User Submits Goal**
+```http
+POST /api/v1/plans/create
 {
   "goal": {
-    "title": "Design and validate automotive component",
-    "description": "Create a new brake caliper design with simulation validation",
-    "domain": "automotive",
+    "title": "Design and validate automotive brake caliper",
+    "description": "Create new brake caliper with FEA validation",
     "constraints": {
       "timeline": "30 days",
       "budget": 100000,
       "compliance": ["ISO 26262", "IATF 16949"]
-    },
-    "priority": "high"
-  },
-  "options": {
-    "auto_execute": false,
-    "enable_replanning": true,
-    "parallelization": "aggressive"
+    }
   }
 }
 ```
 
-**Response**:
-```json
-{
-  "plan_id": "plan_abc123",
-  "status": "planning",
-  "created_at": "2026-01-20T11:30:00Z",
-  "estimated_completion": "2026-02-19T11:30:00Z",
-  "task_count": 45,
-  "agents_assigned": ["META", "CAD", "SIM", "COMP", "SUPP"],
-  "message": "Plan created successfully. Decomposing goal across domain agents."
-}
+#### 2. **Meta Planner Receives Goal**
+- File: `src/core/meta_planner.py`
+- Function: `create_plan(goal, options)`
+- Action: Orchestrates the entire planning workflow
+
+#### 3. **Goal Decomposition**
+- Function: `_decompose_goal(goal)`
+- Action: Delegates to Agent Coordinator
+
+#### 4. **Agent Coordinator Distributes Work**
+- File: `src/agents/agent_coordinator.py`
+- Function: `coordinate_planning(goal)`
+- Action: Calls all 5 domain agents **in parallel**
+
+#### 5. **Domain Agents Generate Tasks (Parallel)**
+
+Each domain agent receives the goal and generates domain-specific tasks:
+
+**META Agent** → 2-4 governance tasks
+```python
+[
+  Task("Verify ISO 26262 compliance", agent="META", dependencies=[]),
+  Task("Perform safety hazard analysis", agent="META", dependencies=[])
+]
 ```
 
-#### `GET /plans/{plan_id}`
-Get detailed plan information.
+**CAD Agent** → 3-5 design tasks
+```python
+[
+  Task("Create brake caliper concept designs", agent="CAD", dependencies=["META_001"]),
+  Task("Generate parametric CAD model", agent="CAD", dependencies=["CAD_001"]),
+  Task("Perform DFM analysis", agent="CAD", dependencies=["CAD_002"])
+]
+```
 
-**Response**:
+**SIM Agent** → 3-5 simulation tasks
+```python
+[
+  Task("Create FEA mesh", agent="SIM", dependencies=["CAD_002"]),
+  Task("Run stress analysis", agent="SIM", dependencies=["SIM_001"]),
+  Task("Verify performance criteria", agent="SIM", dependencies=["SIM_002"])
+]
+```
+
+**COMP Agent** → 2-4 component tasks
+```python
+[
+  Task("Select fasteners and hardware", agent="COMP", dependencies=["CAD_003"]),
+  Task("Generate BOM", agent="COMP", dependencies=["COMP_001"])
+]
+```
+
+**SUPP Agent** → 2-4 supply chain tasks
+```python
+[
+  Task("Identify qualified suppliers", agent="SUPP", dependencies=["COMP_002"]),
+  Task("Request quotes", agent="SUPP", dependencies=["SUPP_001"])
+]
+```
+
+#### 6. **Add Cross-Domain Dependencies**
+- Function: `_add_cross_domain_dependencies()`
+- Action: Links tasks across domains in sequence: **META → CAD → SIM → COMP → SUPP**
+
+This ensures:
+- Design can't start until compliance is verified
+- Simulation can't run until CAD model exists
+- Components can't be selected until design is validated
+- Suppliers can't be contacted until BOM is ready
+
+#### 7. **Build Task Graph**
+- Function: `_analyze_dependencies(tasks)`
+- Action: Creates `DependencyEdge` objects from task dependencies
+- Result: Directed Acyclic Graph (DAG) of all tasks
+
+#### 8. **Calculate Metrics**
+- Function: `_calculate_metrics(task_graph)`
+- Uses: NetworkX library for graph analysis
+- Calculates:
+  - **Total tasks**: 15-20 tasks
+  - **Critical path length**: Longest dependency chain (e.g., 8 tasks)
+  - **Parallelization ratio**: How much can run in parallel (e.g., 0.73)
+  - **Estimated makespan**: Total time to complete (e.g., 18 days)
+
+#### 9. **Return Plan to User**
 ```json
 {
   "plan_id": "plan_abc123",
-  "goal": {...},
   "status": "ready",
-  "created_at": "2026-01-20T11:30:00Z",
-  "updated_at": "2026-01-20T11:32:00Z",
-  "task_graph": {
-    "nodes": [
-      {
-        "task_id": "task_001",
-        "name": "Regulatory compliance check",
-        "agent": "META",
-        "status": "pending",
-        "dependencies": [],
-        "estimated_duration": "2 hours"
-      },
-      {
-        "task_id": "task_002",
-        "name": "Initial CAD design",
-        "agent": "CAD",
-        "status": "pending",
-        "dependencies": ["task_001"],
-        "estimated_duration": "8 hours"
-      }
-    ],
-    "edges": [
-      {"from": "task_001", "to": "task_002", "type": "sequential"}
-    ]
-  },
+  "task_count": 18,
+  "agents_assigned": ["META", "CAD", "SIM", "COMP", "SUPP"],
   "metrics": {
-    "total_tasks": 45,
-    "critical_path_length": 12,
+    "total_tasks": 18,
+    "critical_path_length": 8,
     "parallelization_ratio": 0.73,
     "estimated_makespan": "18 days"
   }
 }
 ```
 
-#### `GET /plans/{plan_id}/graph`
-Get dependency graph visualization data.
-
-**Response**:
-```json
-{
-  "plan_id": "plan_abc123",
-  "graph": {
-    "format": "dagre",
-    "nodes": [...],
-    "edges": [...],
-    "critical_path": ["task_001", "task_002", "task_015", "task_030"]
-  },
-  "visualization_url": "/visualizations/plan_abc123.svg"
-}
-```
-
-#### `GET /plans/{plan_id}/schedule`
-Get optimized execution schedule.
-
-**Response**:
-```json
-{
-  "plan_id": "plan_abc123",
-  "schedule": {
-    "algorithm": "critical_path_method",
-    "makespan": "18 days",
-    "time_slots": [
-      {
-        "start_time": "2026-01-20T12:00:00Z",
-        "end_time": "2026-01-20T14:00:00Z",
-        "tasks": ["task_001"],
-        "agents": ["META"]
-      },
-      {
-        "start_time": "2026-01-20T14:00:00Z",
-        "end_time": "2026-01-20T22:00:00Z",
-        "tasks": ["task_002", "task_003", "task_004"],
-        "agents": ["CAD", "SIM", "COMP"]
-      }
-    ],
-    "resource_utilization": {
-      "META": 0.45,
-      "CAD": 0.82,
-      "SIM": 0.67,
-      "COMP": 0.55,
-      "SUPP": 0.38
-    }
-  }
-}
-```
-
-#### `POST /plans/{plan_id}/replan`
-Trigger adaptive replanning.
-
-**Request**:
-```json
-{
-  "reason": "task_failure",
-  "failed_task_id": "task_015",
-  "constraints": {
-    "preserve_completed": true,
-    "max_delay": "2 days"
-  }
-}
-```
-
-**Response**:
-```json
-{
-  "plan_id": "plan_abc123",
-  "replan_id": "replan_xyz789",
-  "status": "replanning",
-  "changes": {
-    "tasks_added": 3,
-    "tasks_removed": 1,
-    "tasks_modified": 5
-  },
-  "estimated_impact": {
-    "delay": "1.5 days",
-    "cost_increase": 5000
-  }
-}
-```
-
-#### `DELETE /plans/{plan_id}`
-Cancel/delete a plan.
-
-**Response**:
-```json
-{
-  "plan_id": "plan_abc123",
-  "status": "cancelled",
-  "message": "Plan cancelled successfully"
-}
-```
-
 ---
 
-## Stage 2: Execution APIs
+### Workflow 2: Plan Execution
 
-### 2.1 Execution Management
+**Step-by-Step Process**:
 
-#### `POST /executions/start`
-Start plan execution.
-
-**Request**:
-```json
+#### 1. **User Starts Execution**
+```http
+POST /api/v1/executions/start
 {
   "plan_id": "plan_abc123",
-  "execution_mode": "parallel",
-  "options": {
-    "dry_run": false,
-    "checkpoint_interval": "1 hour",
-    "failure_strategy": "replan"
-  }
+  "execution_mode": "parallel"
 }
 ```
 
-**Response**:
-```json
-{
-  "execution_id": "exec_def456",
-  "plan_id": "plan_abc123",
-  "status": "running",
-  "started_at": "2026-01-20T12:00:00Z",
-  "websocket_url": "ws://localhost:8000/ws/executions/exec_def456"
-}
+#### 2. **Execution Engine Initializes**
+- File: `src/execution/execution_engine.py`
+- Function: `start_execution(plan, options)`
+- Action: Creates execution state and tracks progress
+
+#### 3. **Get Execution Order**
+- Function: `get_execution_order(task_graph)`
+- Uses: Topological sort (NetworkX)
+- Returns: Tasks grouped into parallel batches
+
+Example:
+```python
+[
+  ["META_001", "META_002"],           # Batch 1 (parallel)
+  ["CAD_001"],                        # Batch 2
+  ["CAD_002", "CAD_003"],            # Batch 3 (parallel)
+  ["SIM_001"],                        # Batch 4
+  ["SIM_002", "COMP_001"],           # Batch 5 (parallel)
+  ...
+]
 ```
 
-#### `GET /executions/{execution_id}`
-Get execution status.
+#### 4. **Execute Tasks in Batches**
+- For each batch:
+  - All tasks in batch run **in parallel** (async)
+  - Wait for all tasks in batch to complete
+  - Move to next batch
 
-**Response**:
+#### 5. **Task Execution**
+- Function: `_execute_task(task)`
+- Actions:
+  1. Set `task.status = RUNNING`
+  2. Execute task logic (LLM call, simulation, etc.)
+  3. Set `task.status = COMPLETED` or `FAILED`
+  4. Record results and metrics
+
+#### 6. **Progress Monitoring**
+```http
+GET /api/v1/executions/{execution_id}
+```
+
+Returns:
 ```json
 {
   "execution_id": "exec_def456",
-  "plan_id": "plan_abc123",
   "status": "running",
-  "started_at": "2026-01-20T12:00:00Z",
   "progress": {
     "completed_tasks": 12,
-    "total_tasks": 45,
-    "percentage": 26.7,
-    "current_tasks": [
-      {
-        "task_id": "task_013",
-        "agent": "CAD",
-        "status": "running",
-        "progress": 0.65
-      }
-    ]
+    "total_tasks": 18,
+    "percentage": 66.7,
+    "current_tasks": ["SIM_002", "COMP_001"]
   },
   "metrics": {
     "elapsed_time": "4 hours",
-    "estimated_remaining": "14 hours",
-    "throughput": "3 tasks/hour"
-  }
-}
-```
-
-#### `POST /executions/{execution_id}/pause`
-Pause execution.
-
-**Response**:
-```json
-{
-  "execution_id": "exec_def456",
-  "status": "paused",
-  "paused_at": "2026-01-20T16:00:00Z",
-  "checkpoint_id": "checkpoint_001"
-}
-```
-
-#### `POST /executions/{execution_id}/resume`
-Resume paused execution.
-
-**Response**:
-```json
-{
-  "execution_id": "exec_def456",
-  "status": "running",
-  "resumed_at": "2026-01-20T16:30:00Z",
-  "resumed_from": "checkpoint_001"
-}
-```
-
-#### `POST /executions/{execution_id}/cancel`
-Cancel execution.
-
-**Response**:
-```json
-{
-  "execution_id": "exec_def456",
-  "status": "cancelled",
-  "cancelled_at": "2026-01-20T17:00:00Z",
-  "completed_tasks": 18,
-  "rollback_available": true
-}
-```
-
-#### `GET /executions/{execution_id}/logs`
-Get execution logs.
-
-**Query Parameters**:
-- `level`: `debug`, `info`, `warning`, `error`
-- `agent`: Filter by agent ID
-- `task`: Filter by task ID
-- `limit`: Number of log entries (default: 100)
-- `offset`: Pagination offset
-
-**Response**:
-```json
-{
-  "execution_id": "exec_def456",
-  "logs": [
-    {
-      "timestamp": "2026-01-20T12:05:00Z",
-      "level": "info",
-      "agent": "CAD",
-      "task_id": "task_002",
-      "message": "Starting CAD design task",
-      "metadata": {...}
-    }
-  ],
-  "total": 1523,
-  "limit": 100,
-  "offset": 0
-}
-```
-
-#### `GET /executions/{execution_id}/metrics`
-Get detailed execution metrics.
-
-**Response**:
-```json
-{
-  "execution_id": "exec_def456",
-  "metrics": {
-    "performance": {
-      "total_time": "4 hours",
-      "planning_time": "2 minutes",
-      "execution_time": "3 hours 58 minutes",
-      "throughput": "3 tasks/hour",
-      "parallelization_achieved": 0.71
-    },
-    "resource_utilization": {
-      "META": {"avg": 0.45, "peak": 0.78},
-      "CAD": {"avg": 0.82, "peak": 0.95},
-      "SIM": {"avg": 0.67, "peak": 0.88}
-    },
-    "quality": {
-      "task_success_rate": 0.94,
-      "replanning_count": 2,
-      "retry_count": 5
-    }
+    "estimated_remaining": "2 hours"
   }
 }
 ```
 
 ---
 
-## Stage 3: Agent Management APIs
+### Workflow 3: Adaptive Replanning
 
-### 3.1 Agent Registry & Discovery
+**When a Task Fails**:
 
-#### `POST /agents/register`
-Register a new agent.
+#### 1. **Failure Detection**
+- Task execution fails
+- Set `task.status = FAILED`
+- Capture failure reason
 
-**Request**:
-```json
+#### 2. **User Triggers Replan**
+```http
+POST /api/v1/plans/{plan_id}/replan
 {
-  "agent_type": "CAD",
-  "agent_id": "cad_agent_002",
-  "capabilities": ["design", "modeling", "validation"],
-  "capacity": {
-    "max_concurrent_tasks": 5,
-    "max_queue_size": 20
-  },
-  "metadata": {
-    "version": "1.0.0",
-    "llm_model": "gpt-4"
+  "failed_task_id": "SIM_002",
+  "reason": "Stress exceeds material yield strength"
+}
+```
+
+#### 3. **Analyze Failure Impact**
+- Function: `replan(plan, failed_task_id)`
+- Actions:
+  1. Check task dependencies
+  2. Identify affected downstream tasks
+  3. Determine if minor (retry) or major (replan)
+
+#### 4. **Minor Failure → Retry**
+- Re-enqueue failed task
+- Retry with exponential backoff
+- No changes to task graph
+
+#### 5. **Major Failure → Replan**
+- Request new plan from affected domain agent
+- Context includes:
+  - `failed_task_id`
+  - `failure_reason`
+  - `constraints`
+
+Example:
+```python
+# CAD agent replans after SIM failure
+coordinator.request_replan(
+  domain="CAD",
+  context={
+    "failed_task": "SIM_002",
+    "reason": "Stress exceeds yield strength",
+    "constraint": "Reduce stress by 20%"
   }
-}
+)
 ```
 
-**Response**:
-```json
-{
-  "agent_id": "cad_agent_002",
-  "status": "registered",
-  "registered_at": "2026-01-20T11:00:00Z",
-  "token": "agent_token_xyz..."
-}
+#### 6. **Generate Alternative Tasks**
+- Domain agent uses LLM to generate new tasks
+- Example: "Increase rib thickness to reduce stress"
+
+#### 7. **Rebuild Task Graph**
+- Replace failed tasks with new tasks
+- Rebuild dependencies
+- Recalculate metrics
+
+#### 8. **Resume Execution**
+- Continue from where it left off
+- Execute new tasks
+- Monitor for further failures
+
+---
+
+## Implementation Details
+
+### Key Technologies
+
+| Component | Technology |
+|-----------|------------|
+| **Backend** | FastAPI (Python) |
+| **LLM Integration** | OpenAI GPT-4 / Gemini |
+| **Graph Analysis** | NetworkX |
+| **Async Execution** | asyncio |
+| **Data Models** | Pydantic |
+| **API Documentation** | OpenAPI/Swagger |
+
+### Data Models
+
+#### Goal
+```python
+class Goal:
+    title: str
+    description: str
+    domain: str
+    constraints: Dict[str, Any]
+    priority: str
 ```
 
-#### `GET /agents`
-List all registered agents.
-
-**Query Parameters**:
-- `type`: Filter by agent type
-- `status`: Filter by status (`active`, `inactive`, `failed`)
-
-**Response**:
-```json
-{
-  "agents": [
-    {
-      "agent_id": "meta_planner_001",
-      "type": "META_PLANNER",
-      "status": "active",
-      "load": 0.35,
-      "tasks_completed": 156,
-      "uptime": "72 hours",
-      "last_heartbeat": "2026-01-20T11:29:00Z"
-    },
-    {
-      "agent_id": "cad_agent_001",
-      "type": "CAD",
-      "status": "active",
-      "load": 0.82,
-      "tasks_completed": 89,
-      "uptime": "48 hours",
-      "last_heartbeat": "2026-01-20T11:29:00Z"
-    }
-  ],
-  "total": 12
-}
+#### Task
+```python
+class Task:
+    task_id: str
+    name: str
+    agent: str
+    status: TaskStatus  # PENDING, RUNNING, COMPLETED, FAILED
+    dependencies: List[str]
+    estimated_duration: str
 ```
 
-#### `GET /agents/{agent_id}`
-Get agent details.
-
-**Response**:
-```json
-{
-  "agent_id": "cad_agent_001",
-  "type": "CAD",
-  "status": "active",
-  "capabilities": ["design", "modeling", "validation"],
-  "current_load": 0.82,
-  "capacity": {
-    "max_concurrent_tasks": 5,
-    "current_tasks": 4,
-    "queued_tasks": 8
-  },
-  "statistics": {
-    "tasks_completed": 89,
-    "tasks_failed": 3,
-    "success_rate": 0.967,
-    "avg_task_duration": "2.5 hours"
-  },
-  "health": {
-    "status": "healthy",
-    "cpu_usage": 0.65,
-    "memory_usage": 0.48,
-    "last_heartbeat": "2026-01-20T11:29:00Z"
-  }
-}
+#### Plan
+```python
+class Plan:
+    plan_id: str
+    goal: Goal
+    status: PlanStatus  # PLANNING, READY, EXECUTING, COMPLETED
+    task_graph: TaskGraph
+    metrics: PlanMetrics
+    agents_assigned: List[str]
 ```
 
-#### `POST /agents/{agent_id}/invoke`
-Directly invoke an agent action.
+### LLM Prompts
 
-**Request**:
-```json
-{
-  "action": "plan",
-  "payload": {
-    "goal": "Design brake caliper",
-    "constraints": {...}
-  }
-}
+Each domain agent has a specialized prompt:
+
+**META Agent Prompt**:
+```
+You are a META planning agent responsible for governance and compliance.
+Given the goal: {goal}
+Generate 2-4 tasks covering:
+- Policy validation
+- Safety analysis
+- Compliance verification
+- Constraint formalization
 ```
 
-**Response**:
-```json
-{
-  "agent_id": "cad_agent_001",
-  "action": "plan",
-  "status": "completed",
-  "result": {
-    "plan": {...},
-    "estimated_duration": "8 hours"
-  },
-  "execution_time": "1.2 seconds"
-}
+**CAD Agent Prompt**:
 ```
-
-#### `DELETE /agents/{agent_id}`
-Deregister an agent.
-
-**Response**:
-```json
-{
-  "agent_id": "cad_agent_002",
-  "status": "deregistered",
-  "message": "Agent deregistered successfully"
-}
+You are a CAD planning agent responsible for design and geometry.
+Given the goal: {goal}
+Generate 3-5 tasks covering:
+- Concept generation
+- Parametric modeling
+- Detailed geometry
+- DFM analysis
 ```
 
 ---
 
-## Stage 4: Coordination & Communication APIs
+## Key Benefits
 
-### 4.1 Message Bus
+### 1. **Deep Specialization**
+- Each agent focuses on one narrow capability
+- Expertise is concentrated and reusable
+- Easier to debug and improve individual agents
 
-#### `POST /messages/publish`
-Publish a message to the message bus.
+### 2. **High Parallelism**
+- Tasks run in parallel within and across domains
+- Reduces overall execution time
+- Better resource utilization
 
-**Request**:
-```json
-{
-  "topic": "task.completed",
-  "payload": {
-    "task_id": "task_002",
-    "agent_id": "cad_agent_001",
-    "result": {...}
-  },
-  "priority": "normal"
-}
-```
+### 3. **Fault Isolation**
+- Failures are contained to specific agents
+- Localized replanning instead of full restart
+- System remains operational even with partial failures
 
-**Response**:
-```json
-{
-  "message_id": "msg_abc123",
-  "topic": "task.completed",
-  "published_at": "2026-01-20T12:30:00Z",
-  "subscribers_notified": 3
-}
-```
+### 4. **Scalability**
+- Add new domains without changing existing ones
+- Scale individual domains independently
+- Horizontal scaling by adding agent instances
 
-#### `POST /messages/subscribe`
-Subscribe to message topics.
+### 5. **Interpretability**
+- Clear task graph shows what's happening
+- Each task has explicit dependencies
+- Easy to trace decisions and reasoning
 
-**Request**:
-```json
-{
-  "agent_id": "sim_agent_001",
-  "topics": ["task.completed", "plan.updated"],
-  "filters": {
-    "agent_type": "CAD"
-  }
-}
-```
+### 6. **Adaptive Replanning**
+- System can recover from failures automatically
+- Learns from failures to generate better plans
+- Continuous improvement through feedback loops
 
-**Response**:
-```json
-{
-  "subscription_id": "sub_xyz789",
-  "agent_id": "sim_agent_001",
-  "topics": ["task.completed", "plan.updated"],
-  "created_at": "2026-01-20T12:00:00Z"
-}
-```
-
-#### `DELETE /messages/subscribe/{subscription_id}`
-Unsubscribe from topics.
-
-**Response**:
-```json
-{
-  "subscription_id": "sub_xyz789",
-  "status": "unsubscribed"
-}
-```
-
-### 4.2 Task Queue
-
-#### `POST /queue/enqueue`
-Add task to execution queue.
-
-**Request**:
-```json
-{
-  "task_id": "task_015",
-  "agent_type": "SIM",
-  "priority": "high",
-  "payload": {...}
-}
-```
-
-**Response**:
-```json
-{
-  "queue_id": "queue_item_001",
-  "task_id": "task_015",
-  "position": 3,
-  "estimated_wait": "15 minutes"
-}
-```
-
-#### `GET /queue/status`
-Get queue status.
-
-**Response**:
-```json
-{
-  "queues": [
-    {
-      "agent_type": "CAD",
-      "pending_tasks": 8,
-      "processing_tasks": 4,
-      "avg_wait_time": "12 minutes"
-    },
-    {
-      "agent_type": "SIM",
-      "pending_tasks": 5,
-      "processing_tasks": 3,
-      "avg_wait_time": "8 minutes"
-    }
-  ]
-}
-```
+### 7. **Research-Grade Architecture**
+- Suitable for academic research in multi-agent systems
+- Clear mapping to HTN (Hierarchical Task Network) planning
+- Enables experimentation with different coordination strategies
 
 ---
 
-## Stage 5: Monitoring & Analytics APIs
+## Example End-to-End Scenario
 
-### 5.1 System Monitoring
+### Goal
+"Design and validate an automotive brake caliper"
 
-#### `GET /status`
-System health check.
+### Planning Phase (2 minutes)
+1. META agents verify ISO 26262 compliance requirements
+2. CAD agents generate 3 concept designs
+3. SIM agents plan FEA and thermal analysis
+4. COMP agents identify required fasteners and materials
+5. SUPP agents find qualified automotive suppliers
 
-**Response**:
-```json
-{
-  "status": "healthy",
-  "version": "1.0.0",
-  "uptime": "72 hours",
-  "components": {
-    "api": "healthy",
-    "database": "healthy",
-    "message_bus": "healthy",
-    "agent_coordinator": "healthy"
-  },
-  "active_agents": 12,
-  "active_executions": 3
-}
-```
+**Result**: 18 tasks organized into 8 parallel batches
 
-#### `GET /metrics`
-System-wide metrics.
+### Execution Phase (18 days)
+1. **Day 1-2**: Compliance verification and concept design
+2. **Day 3-7**: Parametric CAD modeling and DFM analysis
+3. **Day 8-12**: FEA stress analysis and thermal simulation
+4. **Day 13-14**: Performance validation and optimization
+5. **Day 15-16**: BOM generation and component selection
+6. **Day 17-18**: Supplier quotes and procurement planning
 
-**Response**:
-```json
-{
-  "timestamp": "2026-01-20T11:30:00Z",
-  "system": {
-    "total_plans": 156,
-    "active_executions": 3,
-    "completed_executions": 142,
-    "failed_executions": 11,
-    "success_rate": 0.928
-  },
-  "agents": {
-    "total_registered": 12,
-    "active": 11,
-    "avg_utilization": 0.62
-  },
-  "performance": {
-    "avg_planning_time": "1.8 minutes",
-    "avg_execution_time": "12.5 hours",
-    "throughput": "2.5 plans/day"
-  }
-}
-```
+### Replanning Event (Day 10)
+- **Failure**: FEA shows stress exceeds yield strength
+- **Analysis**: Rib thickness insufficient
+- **Replan**: CAD agent generates new task "Increase rib thickness by 3mm"
+- **Re-execute**: New FEA analysis passes
+- **Impact**: 1.5 day delay, total time now 19.5 days
 
-#### `GET /metrics/agents/{agent_type}`
-Agent-specific metrics.
-
-**Response**:
-```json
-{
-  "agent_type": "CAD",
-  "instances": 3,
-  "metrics": {
-    "total_tasks": 267,
-    "completed_tasks": 254,
-    "failed_tasks": 13,
-    "success_rate": 0.951,
-    "avg_task_duration": "2.3 hours",
-    "avg_utilization": 0.78
-  }
-}
-```
-
-### 5.2 Analytics
-
-#### `GET /analytics/plans`
-Plan analytics.
-
-**Query Parameters**:
-- `start_date`: Start date for analysis
-- `end_date`: End date for analysis
-- `domain`: Filter by domain
-
-**Response**:
-```json
-{
-  "period": {
-    "start": "2026-01-01T00:00:00Z",
-    "end": "2026-01-20T23:59:59Z"
-  },
-  "analytics": {
-    "total_plans": 156,
-    "avg_complexity": 42.5,
-    "avg_makespan": "15.2 days",
-    "parallelization_ratio": 0.68,
-    "domains": {
-      "automotive": 89,
-      "aerospace": 45,
-      "consumer": 22
-    }
-  }
-}
-```
-
-#### `GET /analytics/benchmarks`
-Benchmark results.
-
-**Response**:
-```json
-{
-  "benchmarks": [
-    {
-      "scenario": "simple",
-      "runs": 50,
-      "avg_planning_time": "0.5 seconds",
-      "avg_execution_time": "2.3 hours",
-      "success_rate": 0.98
-    },
-    {
-      "scenario": "complex",
-      "runs": 20,
-      "avg_planning_time": "4.2 seconds",
-      "avg_execution_time": "18.5 hours",
-      "success_rate": 0.85
-    }
-  ]
-}
-```
+### Final Output
+- ✅ Validated CAD model
+- ✅ FEA reports showing compliance
+- ✅ Complete BOM with costs
+- ✅ Supplier quotes and lead times
+- ✅ Total cost: $2,450
+- ✅ Ready for manufacturing
 
 ---
 
-## Stage 6: WebSocket APIs
+## Conclusion
 
-### 6.1 Real-time Updates
+This **Meta Planning & Parallel Domain Decomposition** architecture represents a paradigm shift from monolithic AI agents to a **swarm of specialized agents** working in concert. By decomposing complex goals across multiple domains and leveraging parallelism, the system achieves:
 
-#### `WS /ws/executions/{execution_id}`
-Real-time execution updates.
+- **Faster planning and execution**
+- **Higher quality results through specialization**
+- **Robustness through fault tolerance**
+- **Scalability for complex real-world problems**
 
-**Connection**: WebSocket
-
-**Messages Received**:
-```json
-{
-  "type": "task.started",
-  "execution_id": "exec_def456",
-  "task_id": "task_015",
-  "agent": "SIM",
-  "timestamp": "2026-01-20T14:00:00Z"
-}
-```
-
-```json
-{
-  "type": "task.progress",
-  "execution_id": "exec_def456",
-  "task_id": "task_015",
-  "progress": 0.45,
-  "timestamp": "2026-01-20T14:30:00Z"
-}
-```
-
-```json
-{
-  "type": "task.completed",
-  "execution_id": "exec_def456",
-  "task_id": "task_015",
-  "result": {...},
-  "timestamp": "2026-01-20T15:00:00Z"
-}
-```
-
-#### `WS /ws/agents`
-Real-time agent status updates.
-
-**Messages Received**:
-```json
-{
-  "type": "agent.registered",
-  "agent_id": "cad_agent_003",
-  "timestamp": "2026-01-20T12:00:00Z"
-}
-```
-
-```json
-{
-  "type": "agent.status",
-  "agent_id": "cad_agent_001",
-  "status": "active",
-  "load": 0.82,
-  "timestamp": "2026-01-20T12:05:00Z"
-}
-```
+This architecture is particularly well-suited for **Product Lifecycle Management (PLM)**, **CAD-SIM pipelines**, and **research in multi-agent AI systems**.
 
 ---
 
-## Implementation Stages Summary
+## Next Steps
 
-### **Stage 1: Core Planning** (Week 1-2)
-- `POST /plans/create`
-- `GET /plans/{plan_id}`
-- `GET /plans/{plan_id}/graph`
-- `GET /plans/{plan_id}/schedule`
+1. **Implement remaining domain agents** (currently simplified)
+2. **Add real CAD/SIM tool integrations** (SolidWorks, ANSYS)
+3. **Build monitoring dashboard** for real-time visualization
+4. **Add machine learning** for task duration prediction
+5. **Implement advanced replanning strategies** (reinforcement learning)
+6. **Scale to distributed execution** (Kubernetes, Celery)
 
-### **Stage 2: Execution** (Week 3-4)
-- `POST /executions/start`
-- `GET /executions/{execution_id}`
-- `POST /executions/{execution_id}/pause`
-- `POST /executions/{execution_id}/resume`
-- `GET /executions/{execution_id}/logs`
+---
 
-### **Stage 3: Agent Management** (Week 5)
-- `POST /agents/register`
-- `GET /agents`
-- `GET /agents/{agent_id}`
-- `POST /agents/{agent_id}/invoke`
-
-### **Stage 4: Coordination** (Week 6)
-- Message Bus APIs
-- Task Queue APIs
-- State Management
-
-### **Stage 5: Monitoring** (Week 7)
-- `GET /status`
-- `GET /metrics`
-- Analytics APIs
-
-### **Stage 6: Real-time** (Week 8)
-- WebSocket connections
-- Real-time updates
-- Event streaming
+**For more details, see**:
+- [multi_agent_architecture.md](./multi_agent_architecture.md) - Full architecture specification
+- [WORKFLOW_IMPLEMENTATION.md](./WORKFLOW_IMPLEMENTATION.md) - Implementation guide
+- [src/](./src/) - Source code
 
